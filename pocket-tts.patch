@@ -1,8 +1,8 @@
 diff --git a/pocket_tts/main.py b/pocket_tts/main.py
-index c040425..2e94b7e 100644
+index c040425..cc8d8d6 100644
 --- a/pocket_tts/main.py
 +++ b/pocket_tts/main.py
-@@ -40,8 +40,9 @@ cli_app = typer.Typer(
+@@ -40,8 +40,11 @@ cli_app = typer.Typer(
  # The pocket-tts server implementation
  # ------------------------------------------------------
  
@@ -10,10 +10,57 @@ index c040425..2e94b7e 100644
 +# Global model instance and inference lock (shared across all request threads)
  tts_model: TTSModel | None = None
 +_inference_lock = threading.Lock()
++
++VOICES_STORE_DIR = Path("/root/.cache/pocket_tts/voices")
  
  web_app = FastAPI(
      title="Kyutai Pocket TTS API", description="Text-to-Speech generation API", version="1.0.0"
-@@ -93,10 +94,11 @@ def write_to_queue(queue, text_to_generate, model_state):
+@@ -77,6 +80,44 @@ async def health():
+     return {"status": "healthy"}
+ 
+ 
++@web_app.get("/voices")
++def list_voices():
++    """List stored voice embeddings."""
++    VOICES_STORE_DIR.mkdir(parents=True, exist_ok=True)
++    voices = [p.stem for p in sorted(VOICES_STORE_DIR.glob("*.safetensors"))]
++    return {"voices": voices}
++
++
++@web_app.post("/voices")
++def upload_voice(
++    name: str = Form(...),
++    voice_wav: UploadFile = File(...),
++):
++    """
++    Convert an uploaded audio file to a cached voice embedding (.safetensors).
++    The stored voice can then be used in /tts via voice_url=<name>.
++    """
++    if not name.strip() or "/" in name or "\\" in name:
++        raise HTTPException(status_code=400, detail="Invalid voice name")
++
++    VOICES_STORE_DIR.mkdir(parents=True, exist_ok=True)
++    dest = VOICES_STORE_DIR / f"{name}.safetensors"
++
++    suffix = Path(voice_wav.filename).suffix if voice_wav.filename else ".wav"
++    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
++        tmp.write(voice_wav.file.read())
++        tmp_path = tmp.name
++
++    try:
++        with _inference_lock:
++            model_state = tts_model.get_state_for_audio_prompt(Path(tmp_path), truncate=True)
++        export_model_state(model_state, dest)
++    finally:
++        os.unlink(tmp_path)
++
++    return {"name": name, "path": str(dest)}
++
++
+ def write_to_queue(queue, text_to_generate, model_state):
+     """Allows writing to the StreamingResponse as if it were a file."""
+ 
+@@ -93,10 +134,11 @@ def write_to_queue(queue, text_to_generate, model_state):
          def close(self):
              self.queue.put(None)
  
@@ -29,7 +76,35 @@ index c040425..2e94b7e 100644
  
  
  def generate_data_with_state(text_to_generate: str, model_state: dict):
-@@ -210,6 +212,8 @@ def serve(
+@@ -143,17 +185,23 @@ def text_to_speech(
+ 
+     # Use the appropriate model state
+     if voice_url is not None:
+-        if not (
++        stored = VOICES_STORE_DIR / f"{voice_url}.safetensors"
++        if stored.exists():
++            model_state = tts_model._cached_get_state_for_audio_prompt(str(stored))
++            logging.warning("Using stored voice: %s", voice_url)
++        elif not (
+             voice_url.startswith("http://")
+             or voice_url.startswith("https://")
+             or voice_url.startswith("hf://")
+             or voice_url in _ORIGINS_OF_PREDEFINED_VOICES
+         ):
+             raise HTTPException(
+-                status_code=400, detail="voice_url must start with http://, https://, or hf://"
++                status_code=400,
++                detail=f"Unknown voice '{voice_url}'. Use a URL, a predefined name, or upload via POST /voices.",
+             )
+-        model_state = tts_model._cached_get_state_for_audio_prompt(voice_url)
+-        logging.warning("Using voice from URL: %s", voice_url)
++        else:
++            model_state = tts_model._cached_get_state_for_audio_prompt(voice_url)
++            logging.warning("Using voice from URL: %s", voice_url)
+     elif voice_wav is not None:
+         # Use uploaded voice file - preserve extension for format detection
+         suffix = Path(voice_wav.filename).suffix if voice_wav.filename else ".wav"
+@@ -210,6 +258,8 @@ def serve(
  
      global tts_model
      tts_model = TTSModel.load_model(language=language, config=config, quantize=quantize)
