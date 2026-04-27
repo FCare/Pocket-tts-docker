@@ -2,6 +2,8 @@ services:
   pocket-tts:
     build: .
     container_name: pocket-tts
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
     volumes:
       - pocket_tts_cache:/root/.cache/pocket_tts
       - hf_cache:/root/.cache/huggingface
