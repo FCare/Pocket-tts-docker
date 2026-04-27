@@ -1,0 +1,40 @@
+diff --git a/pocket_tts/main.py b/pocket_tts/main.py
+index c040425..2e94b7e 100644
+--- a/pocket_tts/main.py
++++ b/pocket_tts/main.py
+@@ -40,8 +40,9 @@ cli_app = typer.Typer(
+ # The pocket-tts server implementation
+ # ------------------------------------------------------
+ 
+-# Global model instance
++# Global model instance and inference lock (shared across all request threads)
+ tts_model: TTSModel | None = None
++_inference_lock = threading.Lock()
+ 
+ web_app = FastAPI(
+     title="Kyutai Pocket TTS API", description="Text-to-Speech generation API", version="1.0.0"
+@@ -93,10 +94,11 @@ def write_to_queue(queue, text_to_generate, model_state):
+         def close(self):
+             self.queue.put(None)
+ 
+-    audio_chunks = tts_model.generate_audio_stream(
+-        model_state=model_state, text_to_generate=text_to_generate
+-    )
+-    stream_audio_chunks(FileLikeToQueue(queue), audio_chunks, tts_model.config.mimi.sample_rate)
++    with _inference_lock:
++        audio_chunks = tts_model.generate_audio_stream(
++            model_state=model_state, text_to_generate=text_to_generate
++        )
++        stream_audio_chunks(FileLikeToQueue(queue), audio_chunks, tts_model.config.mimi.sample_rate)
+ 
+ 
+ def generate_data_with_state(text_to_generate: str, model_state: dict):
+@@ -210,6 +212,8 @@ def serve(
+ 
+     global tts_model
+     tts_model = TTSModel.load_model(language=language, config=config, quantize=quantize)
++    tts_model.to(device="cuda")
++    print(f"Model running on: {tts_model.device}")
+ 
+     uvicorn.run("pocket_tts.main:web_app", host=host, port=port, reload=reload)
+ 

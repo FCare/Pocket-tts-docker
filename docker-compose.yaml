@@ -1,0 +1,32 @@
+services:
+  pocket-tts:
+    build: .
+    container_name: pocket-tts
+    volumes:
+      - pocket_tts_cache:/root/.cache/pocket_tts
+      - hf_cache:/root/.cache/huggingface
+    command:
+      - serve
+      - --config
+      - pocket-tts/pocket_tts/config/french_24l.yaml
+      - --host
+      - "0.0.0.0"
+    restart: unless-stopped
+    networks:
+      - ansible
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  pocket_tts_cache:
+  hf_cache:
+
+networks:
+  ansible:
+    external: true
+    name: ansible
