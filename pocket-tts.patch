@@ -1,8 +1,16 @@
 diff --git a/pocket_tts/main.py b/pocket_tts/main.py
-index c040425..cc8d8d6 100644
+index c040425..15762b4 100644
 --- a/pocket_tts/main.py
 +++ b/pocket_tts/main.py
-@@ -40,8 +40,11 @@ cli_app = typer.Typer(
+@@ -4,6 +4,7 @@ import os
+ import sys
+ import tempfile
+ import threading
++import time
+ from pathlib import Path
+ from queue import Queue
+ 
+@@ -40,8 +41,11 @@ cli_app = typer.Typer(
  # The pocket-tts server implementation
  # ------------------------------------------------------
  
@@ -15,7 +23,7 @@ index c040425..cc8d8d6 100644
  
  web_app = FastAPI(
      title="Kyutai Pocket TTS API", description="Text-to-Speech generation API", version="1.0.0"
-@@ -77,6 +80,44 @@ async def health():
+@@ -77,6 +81,44 @@ async def health():
      return {"status": "healthy"}
  
  
@@ -60,7 +68,7 @@ index c040425..cc8d8d6 100644
  def write_to_queue(queue, text_to_generate, model_state):
      """Allows writing to the StreamingResponse as if it were a file."""
  
-@@ -93,10 +134,11 @@ def write_to_queue(queue, text_to_generate, model_state):
+@@ -93,30 +135,45 @@ def write_to_queue(queue, text_to_generate, model_state):
          def close(self):
              self.queue.put(None)
  
@@ -76,7 +84,45 @@ index c040425..cc8d8d6 100644
  
  
  def generate_data_with_state(text_to_generate: str, model_state: dict):
-@@ -143,17 +185,23 @@ def text_to_speech(
+     queue = Queue()
++    t_start = time.monotonic()
++    t_first: float | None = None
++    total_bytes = 0
+ 
+-    # Run your function in a thread
+     thread = threading.Thread(target=write_to_queue, args=(queue, text_to_generate, model_state))
+     thread.start()
+ 
+-    # Yield data as it becomes available
+-    i = 0
+     while True:
+         data = queue.get()
+         if data is None:
+             break
+-        i += 1
++        if t_first is None:
++            t_first = time.monotonic()
++        total_bytes += len(data)
+         yield data
+ 
+     thread.join()
+ 
++    t_end = time.monotonic()
++    gen_time = t_end - t_start
++    ttft = (t_first - t_start) if t_first is not None else gen_time
++    # WAV output: mono, 16-bit PCM → 2 bytes/sample; subtract 44-byte header
++    sample_rate = tts_model.config.mimi.sample_rate
++    audio_duration = max(0, total_bytes - 44) / (sample_rate * 2)
++    rtf = gen_time / audio_duration if audio_duration > 0 else float("inf")
++    logger.info(
++        "TTS done | TTFT: %.2fs | audio: %.2fs | total: %.2fs | RTF: %.3f",
++        ttft, audio_duration, gen_time, rtf,
++    )
++
+ 
+ @web_app.post("/tts")
+ def text_to_speech(
+@@ -143,17 +200,23 @@ def text_to_speech(
  
      # Use the appropriate model state
      if voice_url is not None:
@@ -104,7 +150,7 @@ index c040425..cc8d8d6 100644
      elif voice_wav is not None:
          # Use uploaded voice file - preserve extension for format detection
          suffix = Path(voice_wav.filename).suffix if voice_wav.filename else ".wav"
-@@ -210,6 +258,8 @@ def serve(
+@@ -210,6 +273,8 @@ def serve(
  
      global tts_model
      tts_model = TTSModel.load_model(language=language, config=config, quantize=quantize)
