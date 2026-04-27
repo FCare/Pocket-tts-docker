@@ -4,6 +4,7 @@ services:
     container_name: pocket-tts
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+      - POCKET_TTS_VOICE_CACHE_SIZE=${POCKET_TTS_VOICE_CACHE_SIZE:-5}
     volumes:
       - pocket_tts_cache:/root/.cache/pocket_tts
       - hf_cache:/root/.cache/huggingface

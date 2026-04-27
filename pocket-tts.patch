@@ -113,3 +113,16 @@ index c040425..cc8d8d6 100644
  
      uvicorn.run("pocket_tts.main:web_app", host=host, port=port, reload=reload)
  
+diff --git a/pocket_tts/models/tts_model.py b/pocket_tts/models/tts_model.py
+index 04718d0..43ff14d 100644
+--- a/pocket_tts/models/tts_model.py
++++ b/pocket_tts/models/tts_model.py
+@@ -778,7 +778,7 @@ class TTSModel(nn.Module):
+         latents_queue.put(None)
+         logger.info("Average generation step time: %d ms", int(statistics.mean(steps_times)))
+ 
+-    @lru_cache(maxsize=2)
++    @lru_cache(maxsize=int(os.environ.get("POCKET_TTS_VOICE_CACHE_SIZE", 2)))
+     def _cached_get_state_for_audio_prompt(
+         self, audio_conditioning: Path | str | torch.Tensor, truncate: bool = False
+     ) -> dict:
