@@ -1,5 +1,5 @@
 diff --git a/pocket_tts/main.py b/pocket_tts/main.py
-index c040425..15762b4 100644
+index c040425..0b8be17 100644
 --- a/pocket_tts/main.py
 +++ b/pocket_tts/main.py
 @@ -4,6 +4,7 @@ import os
@@ -114,7 +114,7 @@ index c040425..15762b4 100644
 +    sample_rate = tts_model.config.mimi.sample_rate
 +    audio_duration = max(0, total_bytes - 44) / (sample_rate * 2)
 +    rtf = gen_time / audio_duration if audio_duration > 0 else float("inf")
-+    logger.info(
++    logging.warning(
 +        "TTS done | TTFT: %.2fs | audio: %.2fs | total: %.2fs | RTF: %.3f",
 +        ttft, audio_duration, gen_time, rtf,
 +    )
