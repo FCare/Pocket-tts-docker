@@ -1,5 +1,5 @@
 diff --git a/pocket_tts/main.py b/pocket_tts/main.py
-index c040425..c961385 100644
+index c040425..f3431da 100644
 --- a/pocket_tts/main.py
 +++ b/pocket_tts/main.py
 @@ -4,6 +4,7 @@ import os
@@ -167,20 +167,89 @@ index c040425..c961385 100644
          media_type="audio/wav",
          headers={
              "Content-Disposition": "attachment; filename=generated_speech.wav",
-@@ -210,6 +273,8 @@ def serve(
+@@ -205,11 +268,15 @@ def serve(
+     quantize: Annotated[
+         bool, typer.Option(help="Apply int8 quantization to reduce memory usage")
+     ] = False,
++    device: Annotated[
++        str, typer.Option(help="Force torch device")
++    ] = "cpu",
+ ):
+     """Start the FastAPI server."""
  
      global tts_model
-     tts_model = TTSModel.load_model(language=language, config=config, quantize=quantize)
-+    tts_model.to(device="cuda")
+-    tts_model = TTSModel.load_model(language=language, config=config, quantize=quantize)
++    tts_model = TTSModel.load_model(language=language, config=config, quantize=quantize, device=device)
 +    print(f"Model running on: {tts_model.device}")
  
      uvicorn.run("pocket_tts.main:web_app", host=host, port=port, reload=reload)
  
 diff --git a/pocket_tts/models/tts_model.py b/pocket_tts/models/tts_model.py
-index 04718d0..43ff14d 100644
+index 04718d0..2aedbba 100644
 --- a/pocket_tts/models/tts_model.py
 +++ b/pocket_tts/models/tts_model.py
-@@ -778,7 +778,7 @@ class TTSModel(nn.Module):
+@@ -135,6 +135,7 @@ class TTSModel(nn.Module):
+         noise_clamp: float | None,
+         eos_threshold,
+         origin: Path | None = None,
++        device: str | None = None,
+     ) -> Self:
+         tts_model = cls._from_pydantic_config(
+             config, temp, lsd_decode_steps, noise_clamp, eos_threshold, origin=origin
+@@ -155,7 +156,7 @@ class TTSModel(nn.Module):
+                 )
+             logger.info(f"Loading FlowLM weights from {config.flow_lm.weights_path}")
+             state_dict_flowlm = get_flow_lm_state_dict(
+-                download_if_necessary(config.flow_lm.weights_path)
++                download_if_necessary(config.flow_lm.weights_path), device
+             )
+             tts_model.flow_lm.load_state_dict(state_dict_flowlm, strict=True)
+ 
+@@ -183,7 +184,7 @@ class TTSModel(nn.Module):
+             outer_dim=mimi_config["outer_dim"],
+             encoder_transformer=encoder_transformer,
+             decoder_transformer=decoder_transformer,
+-        ).to(device="cpu")
++        ).to(device=device)
+ 
+         # Load mimi weights from the config safetensors file with complete mapping for strict loading
+ 
+@@ -193,7 +194,7 @@ class TTSModel(nn.Module):
+                     "If you specify mimi.weights_path you should specify flow_lm.weights_path"
+                 )
+             logger.info(f"Loading Mimi weights from {config.mimi.weights_path}")
+-            mimi_state = get_mimi_state_dict(download_if_necessary(config.mimi.weights_path))
++            mimi_state = get_mimi_state_dict(download_if_necessary(config.mimi.weights_path), device=device)
+             tts_model.mimi.load_state_dict(mimi_state, strict=True)
+ 
+         tts_model.mimi.eval()
+@@ -227,7 +228,7 @@ class TTSModel(nn.Module):
+                     continue
+                 module._module_absolute_name = module_name
+ 
+-        return tts_model
++        return tts_model.to(device = device)
+ 
+     @classmethod
+     def load_model(
+@@ -239,6 +240,7 @@ class TTSModel(nn.Module):
+         noise_clamp: float | int | None = DEFAULT_NOISE_CLAMP,
+         eos_threshold: float = DEFAULT_EOS_THRESHOLD,
+         quantize: bool = False,
++        device: str = "cpu"
+     ) -> Self:
+         """Load a pre-trained TTS model with specified configuration.
+ 
+@@ -306,7 +308,7 @@ class TTSModel(nn.Module):
+         logger.info(f"Loading model from config at {config_path}...")
+ 
+         tts_model = TTSModel._from_pydantic_config_with_weights(
+-            config, temp, lsd_decode_steps, noise_clamp, eos_threshold, origin=config_path
++            config, temp, lsd_decode_steps, noise_clamp, eos_threshold, origin=config_path, device = device
+         )
+ 
+         if quantize:
+@@ -778,7 +780,7 @@ class TTSModel(nn.Module):
          latents_queue.put(None)
          logger.info("Average generation step time: %d ms", int(statistics.mean(steps_times)))
  
@@ -189,3 +258,31 @@ index 04718d0..43ff14d 100644
      def _cached_get_state_for_audio_prompt(
          self, audio_conditioning: Path | str | torch.Tensor, truncate: bool = False
      ) -> dict:
+diff --git a/pocket_tts/utils/weights_loading.py b/pocket_tts/utils/weights_loading.py
+index 3f41bda..4a552ca 100644
+--- a/pocket_tts/utils/weights_loading.py
++++ b/pocket_tts/utils/weights_loading.py
+@@ -4,9 +4,9 @@ import safetensors
+ import torch
+ 
+ 
+-def get_flow_lm_state_dict(path: Path) -> dict:
++def get_flow_lm_state_dict(path: Path, device: str) -> dict:
+     state_dict = {}
+-    with safetensors.safe_open(path, framework="pt", device="cpu") as f:
++    with safetensors.safe_open(path, framework="pt", device=device) as f:
+         for key in f.keys():
+             if (
+                 key.startswith("flow.w_s_t.")
+@@ -30,9 +30,9 @@ def get_flow_lm_state_dict(path: Path) -> dict:
+     return state_dict
+ 
+ 
+-def get_mimi_state_dict(path: Path) -> dict:
++def get_mimi_state_dict(path: Path, device = str) -> dict:
+     state_dict = {}
+-    with safetensors.safe_open(path, framework="pt", device="cpu") as f:
++    with safetensors.safe_open(path, framework="pt", device=device) as f:
+         for key in f.keys():
+             if (
+                 key.startswith("model.quantizer.vq.")

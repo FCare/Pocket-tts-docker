@@ -10,6 +10,8 @@ services:
       - hf_cache:/root/.cache/huggingface
     command:
       - serve
+      - --device
+      - cuda
       - --config
       - pocket-tts/pocket_tts/config/french_24l.yaml
       - --host
