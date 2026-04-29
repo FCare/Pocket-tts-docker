@@ -1,3 +1,16 @@
+diff --git a/pocket_tts/data/audio.py b/pocket_tts/data/audio.py
+index e2d26dc..ec48ac3 100644
+--- a/pocket_tts/data/audio.py
++++ b/pocket_tts/data/audio.py
+@@ -59,7 +59,7 @@ class StreamingWAVWriter:
+         self.output_stream = output_stream
+         self.sample_rate = sample_rate
+         self.wave_writer = None
+-        self.first_chunk_buffer = []
++        self.first_chunk_buffer = None
+ 
+     def write_header(self, sample_rate: int):
+         """Initialize WAV writer with header."""
 diff --git a/pocket_tts/main.py b/pocket_tts/main.py
 index c040425..f3431da 100644
 --- a/pocket_tts/main.py
